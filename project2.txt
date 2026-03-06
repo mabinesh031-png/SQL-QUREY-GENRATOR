@@ -1,0 +1,125 @@
+import gradio as gr
+import re
+from datetime import datetime
+
+# -----------------------------
+# Security Validation
+# -----------------------------
+def is_safe(user_input):
+    dangerous_keywords = [
+        "drop", "delete", "alter", "truncate",
+        "insert", "update", "exec", "execute"
+    ]
+
+    if any(word in user_input.lower() for word in dangerous_keywords):
+        return False
+
+    if ";" in user_input or "--" in user_input:
+        return False
+
+    return True
+
+
+# -----------------------------
+# Table Detection
+# -----------------------------
+def get_table_name(query):
+    query = query.lower()
+
+    if any(word in query for word in ["user", "customer", "account"]):
+        return "users"
+    elif any(word in query for word in ["order", "purchase"]):
+        return "orders"
+    elif any(word in query for word in ["product", "item"]):
+        return "products"
+    elif any(word in query for word in ["transaction", "payment"]):
+        return "transactions"
+    else:
+        return None
+
+
+# -----------------------------
+# Condition Extraction
+# -----------------------------
+def extract_conditions(query):
+    query = query.lower()
+    conditions = []
+
+    if "last month" in query:
+        conditions.append("DATE(signup_date) >= DATE('now', '-1 month')")
+
+    if "last week" in query:
+        conditions.append("DATE(date) >= DATE('now', '-7 days')")
+
+    amount_match = re.search(r'greater than (\d+)', query)
+    if amount_match:
+        amount = amount_match.group(1)
+        conditions.append(f"amount > {amount}")
+
+    if conditions:
+        return "WHERE " + " AND ".join(conditions)
+    else:
+        return ""
+
+
+# -----------------------------
+# SQL Generator (Formatted Output)
+# -----------------------------
+def generate_sql(user_input):
+
+    if not is_safe(user_input):
+        return """❌ SECURITY ALERT
+
+Malicious SQL keywords detected.
+Query generation blocked.
+"""
+
+    table = get_table_name(user_input)
+
+    if not table:
+        return "❌ Unable to detect appropriate database table."
+
+    condition = extract_conditions(user_input)
+
+    sql_query = f"SELECT * FROM {table} {condition} LIMIT 10;"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    formatted_output = f"""
+----------------------------------------
+ SQL QUERY GENERATOR OUTPUT
+----------------------------------------
+
+ User Request:
+ "{user_input}"
+
+ Generated SQL Query:
+
+ {sql_query}
+
+ Generated At:
+ {timestamp}
+
+----------------------------------------
+"""
+
+    return formatted_output
+
+
+# -----------------------------
+# Chat Interface
+# -----------------------------
+def chatbot_response(message, history):
+    response = generate_sql(message)
+    history = history + [(message, response)]
+    return history, history
+
+
+with gr.Blocks() as demo:
+    gr.Markdown("## 💡 SQL Query Generator")
+    chatbot = gr.Chatbot()
+    msg = gr.Textbox(placeholder="Enter your natural language query...")
+
+    msg.submit(chatbot_response, [msg, chatbot], [chatbot, chatbot])
+
+demo.launch()
